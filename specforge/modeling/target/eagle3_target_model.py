@@ -102,9 +102,6 @@ class Eagle3TargetModel(ABC):
                 num_layers - 4,
             ]
         self.aux_hidden_states_layers = aux_hidden_states_layers
-        assert (
-            len(self.aux_hidden_states_layers) == 3
-        ), "aux_hidden_states_layers is expected to be 3 layers for EAGLE3"
 
 
 class HFEagle3TargetModel(Eagle3TargetModel):
@@ -379,7 +376,8 @@ class SGLangEagle3TargetModel(Eagle3TargetModel):
         model_worker_batch = batch.get_model_worker_batch()
         forward_batch = ForwardBatch.init_new(model_worker_batch, self.model_runner)
         forward_batch.capture_hidden_mode = CaptureHiddenMode.FULL
-        eagle3_output, _ = self.model_runner.forward(forward_batch)
+        runner_output = self.model_runner.forward(forward_batch)
+        eagle3_output = runner_output.logits_output if hasattr(runner_output, 'logits_output') else runner_output
 
         aux_hidden_states_list = None
         input_lens = [len(req.origin_input_ids) for req in reqs]

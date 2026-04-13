@@ -305,4 +305,14 @@ class OnlineDFlashModel(nn.Module):
             actual_token_count = binary_eval_mask.sum() + 1e-6
             accuracy = correct.sum().float() / actual_token_count
 
-        return loss, accuracy
+            # Per-position accuracy: acc at each k in [0, block_size)
+            # k=0 (anchor) is always masked out, so acc[0] will be 0
+            bsz_eff = input_ids.size(0)
+            n_blocks = anchor_positions.size(1)
+            correct_3d = correct.view(bsz_eff, n_blocks, self.block_size).float()
+            mask_3d = (binary_eval_mask > 0.5).view(bsz_eff, n_blocks, self.block_size).float()
+            per_pos_correct = correct_3d.sum(dim=(0, 1))  # [block_size]
+            per_pos_total = mask_3d.sum(dim=(0, 1)) + 1e-6  # [block_size]
+            per_pos_acc = per_pos_correct / per_pos_total  # [block_size]
+
+        return loss, accuracy, per_pos_acc

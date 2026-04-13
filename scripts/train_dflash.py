@@ -514,7 +514,7 @@ def main():
             hidden_states = target_output.hidden_states.cuda()  # Ensure on GPU
             target_last_hidden = target_output.logits.cuda() if target_output.logits is not None else None
 
-            loss, accuracy = dflash_model(
+            loss, accuracy, per_pos_acc = dflash_model(
                 input_ids=input_ids,
                 hidden_states=hidden_states,
                 loss_mask=loss_mask,
@@ -529,10 +529,13 @@ def main():
             if global_step % args.log_interval == 0:
                 loss_log = loss.clone()
                 acc_log = accuracy.clone()
+                per_pos_log = per_pos_acc.clone()
                 dist.all_reduce(loss_log)
                 dist.all_reduce(acc_log)
+                dist.all_reduce(per_pos_log)
                 loss_log = loss_log / dist.get_world_size()
                 acc_log = acc_log / dist.get_world_size()
+                per_pos_log = per_pos_log / dist.get_world_size()
 
                 record_metrics(
                     args,
@@ -544,6 +547,9 @@ def main():
                     train_dataloader,
                     mode="train",
                 )
+                # Per-position acc: format as k=1:.. k=2:.. etc
+                pp_str = " ".join(f"k{i}={per_pos_log[i].item():.3f}" for i in range(1, per_pos_log.size(0)))
+                print_on_rank0(f"  per_pos_acc {pp_str}")
 
             if dist.get_rank() == 0:
                 elapsed = time.time() - last_time

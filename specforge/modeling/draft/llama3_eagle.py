@@ -524,14 +524,15 @@ class LlamaAttention(nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.max_position_embeddings = config.max_position_embeddings
 
+        qkv_in = self.hidden_size if getattr(config, "merge_add", False) else self.hidden_size * 2
         self.q_proj = nn.Linear(
-            self.hidden_size * 2, self.num_heads * self.head_dim, bias=False
+            qkv_in, self.num_heads * self.head_dim, bias=False
         )
         self.k_proj = nn.Linear(
-            self.hidden_size * 2, self.num_key_value_heads * self.head_dim, bias=False
+            qkv_in, self.num_key_value_heads * self.head_dim, bias=False
         )
         self.v_proj = nn.Linear(
-            self.hidden_size * 2, self.num_key_value_heads * self.head_dim, bias=False
+            qkv_in, self.num_key_value_heads * self.head_dim, bias=False
         )
         self.o_proj = nn.Linear(
             self.num_heads * self.head_dim, self.hidden_size, bias=False
@@ -1224,6 +1225,7 @@ class LlamaDecoderLayer(nn.Module):
     def __init__(self, config, attention_backend: str = "sdpa"):
         super().__init__()
         self.hidden_size = config.hidden_size
+        self.merge_add = getattr(config, "merge_add", False)
 
         if attention_backend == "sdpa":
             self.self_attn = LlamaAttention(config=config)
@@ -1280,7 +1282,10 @@ class LlamaDecoderLayer(nn.Module):
         hidden_states = self.hidden_norm(hidden_states)
         input_emb = self.input_layernorm(input_emb)
 
-        hidden_states = torch.cat((input_emb, hidden_states), dim=-1)
+        if self.merge_add:
+            hidden_states = input_emb + hidden_states
+        else:
+            hidden_states = torch.cat((input_emb, hidden_states), dim=-1)
         # Self Attention
         hidden_states = self.self_attn(
             cache_hidden=cache_hidden,
@@ -1319,13 +1324,14 @@ class LlamaForCausalLMEagle3(Eagle3DraftModel):
         )
         self.midlayer = LlamaDecoderLayer(config, attention_backend=attention_backend)
 
+        num_aux = getattr(config, "num_aux_layers", 3)
         if hasattr(config, "target_hidden_size"):
             self.fc = torch.nn.Linear(
-                config.target_hidden_size * 3, config.hidden_size, bias=False
+                config.target_hidden_size * num_aux, config.hidden_size, bias=False
             )
         else:
             self.fc = torch.nn.Linear(
-                config.hidden_size * 3, config.hidden_size, bias=False
+                config.hidden_size * num_aux, config.hidden_size, bias=False
             )
 
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -1399,8 +1405,6 @@ class LlamaForCausalLMEagle3(Eagle3DraftModel):
         return self.embed_tokens(input_ids)
 
     def project_hidden_states(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        # eagle 3 requires hidden states from 3 layers
-        assert hidden_states.size(-1) == self.config.hidden_size * 3
         return self.fc(hidden_states)
 
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
