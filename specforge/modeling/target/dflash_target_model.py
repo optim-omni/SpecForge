@@ -17,7 +17,7 @@ from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 from sglang.srt.utils import require_mlp_sync, require_mlp_tp_gather
 from transformers import AutoModelForCausalLM
 
-from specforge.distributed import get_tp_group
+from specforge.distributed import get_dp_group, get_tp_group
 
 from .sglang_backend import SGLangRunner
 
@@ -81,6 +81,7 @@ class SGLangDFlashTargetModel(DFlashTargetModel):
         **kwargs,
     ) -> "SGLangDFlashTargetModel":
         tp_size = dist.get_world_size(get_tp_group())
+        dp_size = dist.get_world_size(get_dp_group())
         server_args = ServerArgs(
             model_path=pretrained_model_name_or_path,
             trust_remote_code=trust_remote_code,
@@ -88,6 +89,7 @@ class SGLangDFlashTargetModel(DFlashTargetModel):
             enable_return_hidden_states=True,  # Critical for DFlash
             disable_cuda_graph=True,
             tp_size=tp_size,
+            dp_size=dp_size,
             pp_size=1,
             **kwargs,
         )
@@ -160,7 +162,11 @@ class SGLangDFlashTargetModel(DFlashTargetModel):
         forward_batch.capture_hidden_mode = CaptureHiddenMode.FULL
 
         runner_output = self.model_runner.forward(forward_batch)
-        output = runner_output.logits_output if hasattr(runner_output, 'logits_output') else runner_output
+        output = (
+            runner_output.logits_output
+            if hasattr(runner_output, "logits_output")
+            else runner_output
+        )
 
         input_lens = [len(req.origin_input_ids) for req in reqs]
         if (
@@ -249,7 +255,6 @@ class HFDFlashTargetModel(DFlashTargetModel):
         trust_remote_code: bool = True,
         **kwargs,
     ) -> "HFDFlashTargetModel":
-
         target_model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path,
             torch_dtype=torch_dtype,

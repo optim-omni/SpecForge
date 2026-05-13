@@ -270,6 +270,9 @@ def build_dataloader(args, tokenizer) -> Tuple[DataLoader, Optional[DataLoader]]
     return train_dataloader, eval_dataloader
 
 
+MAX_KEEP_CKPTS = 10
+
+
 def save_checkpoint(args, epoch, step, dflash_model, draft_model, optimizer):
     """Save checkpoint."""
     save_dir = os.path.join(args.output_dir, f"epoch_{epoch}_step_{step}")
@@ -312,6 +315,20 @@ def save_checkpoint(args, epoch, step, dflash_model, draft_model, optimizer):
 
             print_on_rank0(f"Saved checkpoint to {save_dir}")
 
+            ckpt_dirs = sorted(
+                [
+                    d
+                    for d in os.listdir(args.output_dir)
+                    if d.startswith("epoch_")
+                    and os.path.isdir(os.path.join(args.output_dir, d))
+                ]
+            )
+            while len(ckpt_dirs) > MAX_KEEP_CKPTS:
+                oldest = ckpt_dirs.pop(0)
+                oldest_path = os.path.join(args.output_dir, oldest)
+                shutil.rmtree(oldest_path)
+                print_on_rank0(f"Removed old checkpoint: {oldest_path}")
+
     dist.barrier()
 
 
@@ -341,7 +358,6 @@ def record_metrics(
 
 
 def main():
-
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -448,7 +464,7 @@ def main():
             param_dtype=torch.bfloat16,
             buffer_dtype=torch.bfloat16,
         ),
-        sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+        sharding_strategy=ShardingStrategy.NO_SHARD,
     )
     print_with_rank("Initialized FSDP")
 
@@ -512,7 +528,11 @@ def main():
                 input_ids, attention_mask, loss_mask
             )
             hidden_states = target_output.hidden_states.cuda()  # Ensure on GPU
-            target_last_hidden = target_output.logits.cuda() if target_output.logits is not None else None
+            target_last_hidden = (
+                target_output.logits.cuda()
+                if target_output.logits is not None
+                else None
+            )
 
             loss, accuracy, per_pos_acc = dflash_model(
                 input_ids=input_ids,
@@ -548,7 +568,10 @@ def main():
                     mode="train",
                 )
                 # Per-position acc: format as k=1:.. k=2:.. etc
-                pp_str = " ".join(f"k{i}={per_pos_log[i].item():.3f}" for i in range(1, per_pos_log.size(0)))
+                pp_str = " ".join(
+                    f"k{i}={per_pos_log[i].item():.3f}"
+                    for i in range(1, per_pos_log.size(0))
+                )
                 print_on_rank0(f"  per_pos_acc {pp_str}")
 
             if dist.get_rank() == 0:
