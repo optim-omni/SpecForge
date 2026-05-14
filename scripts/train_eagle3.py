@@ -347,9 +347,9 @@ def sp_sanity_check(args: Namespace) -> None:
     args.draft_accumulation_steps = (
         args.draft_accumulation_steps * args.sp_ulysses_size * args.sp_ring_size
     )
-    assert (
-        args.batch_size == 1
-    ), f"USP only supports batch_size=1, got batch_size={args.batch_size}"
+    assert args.batch_size == 1, (
+        f"USP only supports batch_size=1, got batch_size={args.batch_size}"
+    )
 
     assert args.sp_ring_size * args.sp_ulysses_size > 1, (
         f"USP requires sp_ring_size * sp_ulysses_size > 1. "
@@ -529,6 +529,9 @@ def build_dataloaders(
     )
 
 
+MAX_KEEP_CKPTS = 10
+
+
 def save_checkpoints(
     args: Namespace,
     epoch: int,
@@ -568,6 +571,17 @@ def save_checkpoints(
                 state_dict=draft_model_state_dict,
             )
             print_on_rank0(f"Saved model configuration to {epoch_output_dir}")
+
+            ckpt_dirs = sorted(
+                [d for d in os.listdir(args.output_dir) if d.startswith("epoch_")],
+                key=lambda x: int(x.split("_step_")[1]),
+            )
+            while len(ckpt_dirs) > MAX_KEEP_CKPTS:
+                oldest = os.path.join(args.output_dir, ckpt_dirs.pop(0))
+                import shutil
+
+                shutil.rmtree(oldest, ignore_errors=True)
+                print_on_rank0(f"Removed old checkpoint: {oldest}")
         dist.barrier()
 
 
@@ -792,7 +806,7 @@ def main():
             param_dtype=torch.bfloat16,
             buffer_dtype=torch.bfloat16,
         ),
-        sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+        sharding_strategy=ShardingStrategy.NO_SHARD,
         process_group=dist.group.WORLD,  # the draft model should run dp for all processes
     )
     print_with_rank("Initialized Eagle3 FSDP model")

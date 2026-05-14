@@ -30,7 +30,7 @@ from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 from sglang.srt.utils import require_mlp_sync, require_mlp_tp_gather
 from transformers import AutoModelForCausalLM
 
-from specforge.distributed import get_tp_device_mesh, get_tp_group
+from specforge.distributed import get_dp_group, get_tp_device_mesh, get_tp_group
 from specforge.utils import padding
 
 from .sglang_backend import SGLangRunner, wrap_eagle3_logits_processors_in_module
@@ -105,7 +105,6 @@ class Eagle3TargetModel(ABC):
 
 
 class HFEagle3TargetModel(Eagle3TargetModel):
-
     def __init__(self, model: nn.Module):
         super().__init__()
         self.model = model
@@ -250,7 +249,6 @@ class HFEagle3TargetModel(Eagle3TargetModel):
 
 
 class SGLangEagle3TargetModel(Eagle3TargetModel):
-
     def __init__(self, model_runner: SGLangRunner, hf_config=None):
         super().__init__()
         self.model_runner = model_runner
@@ -298,7 +296,8 @@ class SGLangEagle3TargetModel(Eagle3TargetModel):
         trust_remote_code: bool = False,
         **kwargs,
     ) -> "SGLangEagle3TargetModel":
-        tp_size = dist.get_world_size(get_tp_group())
+        dp_size = dist.get_world_size(get_dp_group())
+        tp_size = dist.get_world_size(get_tp_group()) // dp_size
         server_args = ServerArgs(
             model_path=pretrained_model_name_or_path,
             trust_remote_code=trust_remote_code,
@@ -306,6 +305,7 @@ class SGLangEagle3TargetModel(Eagle3TargetModel):
             enable_return_hidden_states=True,
             disable_cuda_graph=True,  # we use piecewise cuda graph for prefill instead
             tp_size=tp_size,
+            dp_size=dp_size,
             pp_size=1,
             **kwargs,
         )
@@ -377,7 +377,11 @@ class SGLangEagle3TargetModel(Eagle3TargetModel):
         forward_batch = ForwardBatch.init_new(model_worker_batch, self.model_runner)
         forward_batch.capture_hidden_mode = CaptureHiddenMode.FULL
         runner_output = self.model_runner.forward(forward_batch)
-        eagle3_output = runner_output.logits_output if hasattr(runner_output, 'logits_output') else runner_output
+        eagle3_output = (
+            runner_output.logits_output
+            if hasattr(runner_output, "logits_output")
+            else runner_output
+        )
 
         aux_hidden_states_list = None
         input_lens = [len(req.origin_input_ids) for req in reqs]
@@ -761,7 +765,6 @@ class SGLangEagle3TargetModel(Eagle3TargetModel):
 
 
 class CustomEagle3TargetModel(Eagle3TargetModel):
-
     def __init__(self, model: nn.Module):
         super().__init__()
         self.model = model
