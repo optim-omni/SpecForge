@@ -297,7 +297,7 @@ class SGLangEagle3TargetModel(Eagle3TargetModel):
         **kwargs,
     ) -> "SGLangEagle3TargetModel":
         dp_size = dist.get_world_size(get_dp_group())
-        tp_size = dist.get_world_size(get_tp_group()) // dp_size
+        tp_size = dist.get_world_size(get_tp_group())
         server_args = ServerArgs(
             model_path=pretrained_model_name_or_path,
             trust_remote_code=trust_remote_code,
