@@ -202,5 +202,5 @@ class SGLangBackendArgs:
             piecewise_cuda_graph_tokens=self.sglang_piecewise_cuda_graph_tokens,
             ep_size=self.sglang_ep_size,
             max_running_requests=self.sglang_max_running_requests,
-            max_total_tokens=self.sglang_max_total_tokens,
+            max_total_tokens=None,
         )
