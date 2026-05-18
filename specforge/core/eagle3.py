@@ -140,6 +140,7 @@ class OnlineEagle3Model(Eagle3Model):
         position_ids: Optional[torch.Tensor] = None,
         image_grid_thw: Optional[torch.Tensor] = None,
         is_vlm: bool = False,
+        use_draft_predicted_tokens: bool = False,
         **kwargs,
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
         """
@@ -251,6 +252,13 @@ class OnlineEagle3Model(Eagle3Model):
 
             # Step 5.4: get logits
             logits = self.draft_model.compute_logits(hidden_states)
+
+            # Step 5.4.1: use draft predicted tokens for next step input
+            if use_draft_predicted_tokens and not is_last:
+                draft_predicted_ids = logits.argmax(dim=-1)  # (batch, seq_len)
+                # Replace the leftmost token of global_input_ids with draft prediction
+                # global_input_ids has been padded (shifted left), so the first token is the one to replace
+                global_input_ids = draft_predicted_ids
 
             # Step 5.5 + 5.6: metric and loss
             acc, loss = self._acc_and_loss(
