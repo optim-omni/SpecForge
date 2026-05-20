@@ -165,8 +165,11 @@ def parse_args() -> Tuple[ArgumentParser, Namespace]:
     )
     training_group.add_argument("--seed", type=int, default=0)
     training_group.add_argument("--draft-accumulation-steps", type=int, default=1)
-    training_group.add_argument("--use-draft-predicted-tokens", action="store_true",
-        help="Use draft model's predicted tokens instead of ground truth tokens for TTT steps")
+    training_group.add_argument(
+        "--use-draft-predicted-tokens",
+        action="store_true",
+        help="Use draft model's predicted tokens instead of ground truth tokens for TTT steps",
+    )
 
     # data processing type
     optimization_group = parser.add_argument_group("optimization")
@@ -384,9 +387,10 @@ def build_draft_model(args: Namespace) -> Tuple[AutoDraftModelConfig, nn.Module]
     draft_model_last_checkpoint = None
     if args.ckpt_dir is not None:
         if os.path.isdir(args.ckpt_dir):
-            draft_model_config = AutoDraftModelConfig.from_file(
-                os.path.join(args.ckpt_dir, "config.json")
-            )
+            if args.draft_model_config is None:
+                draft_model_config = AutoDraftModelConfig.from_file(
+                    os.path.join(args.ckpt_dir, "config.json")
+                )
             draft_model_last_checkpoint = args.ckpt_dir
             print_on_rank0(f"Finetuning from base model: {draft_model_last_checkpoint}")
         else:
@@ -595,7 +599,8 @@ def run_forward(
     is_online: bool = True,
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
     if args.is_vlm and args.target_model_backend == "custom":
-        plosses, _, acces = eagle3_model(use_draft_predicted_tokens=args.use_draft_predicted_tokens, 
+        plosses, _, acces = eagle3_model(
+            use_draft_predicted_tokens=args.use_draft_predicted_tokens,
             input_ids=data["input_ids"].cuda(),
             attention_mask=data["attention_mask"].cuda(),
             loss_mask=data["loss_mask"].cuda(),
@@ -647,7 +652,8 @@ def run_forward(
                 target.cuda()
             )  # The `data['target']` value occupies a large amount of GPU memory, with a shape of [seqlen, vocab_size]. It needs to be processed before being loaded into the GPU.
             loss_mask = loss_mask.cuda()
-        plosses, _, acces = eagle3_model(use_draft_predicted_tokens=args.use_draft_predicted_tokens, 
+        plosses, _, acces = eagle3_model(
+            use_draft_predicted_tokens=args.use_draft_predicted_tokens,
             input_ids=input_ids,
             attention_mask=attention_mask,
             loss_mask=loss_mask,
@@ -909,10 +915,18 @@ def main():
                 last_time = time.time()
                 avg_loss = sum(pl for pl in plosses) / len(plosses)
                 avg_acc = sum(acces) / len(acces)
-                if global_step % (args.log_interval * args.draft_accumulation_steps * 5) == 0:
+                if (
+                    global_step
+                    % (args.log_interval * args.draft_accumulation_steps * 5)
+                    == 0
+                ):
                     acc_str = ",".join(["%.3f" % a for a in acces])
                     loss_str = ",".join(["%.2f" % p for p in plosses])
-                    print("[PerPos] step=%d acc=[%s] loss=[%s] avg_acc=%.3f" % (global_step, acc_str, loss_str, avg_acc), flush=True)
+                    print(
+                        "[PerPos] step=%d acc=[%s] loss=[%s] avg_acc=%.3f"
+                        % (global_step, acc_str, loss_str, avg_acc),
+                        flush=True,
+                    )
                 progress_bar.set_postfix(
                     {
                         "loss": f"{avg_loss:.2f}",
